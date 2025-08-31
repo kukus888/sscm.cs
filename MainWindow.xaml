@@ -5,7 +5,7 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:local="clr-namespace:sscm"
         mc:Ignorable="d"
-        Title="SSCM" Height="800" Width="1700">
+        Title="SSCM" Height="600" Width="1500">
     <Grid>
         <Grid.ColumnDefinitions>
             <ColumnDefinition Width="*"/>
@@ -56,8 +56,17 @@
             </DataGrid.CellStyle>
         </DataGrid>
         <Grid Grid.Row="4" Height="50" VerticalAlignment="Bottom">
-            <Button x:Name="ProcessButton" Content="Process sellout file" Margin="10,0,1550,10" VerticalAlignment="Bottom" AutomationProperties.HelpText="Process the loaded data" Click="ProcessButton_Click" IsEnabled="False" Height="30"/>
-            <Button x:Name="ExportButton" Content="Save results" Height="30" Margin="155,0,1405,10" VerticalAlignment="Bottom" AutomationProperties.HelpText="Save the processed results to the billing file" Click="ExportButton_Click" IsEnabled="False"/>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="140"/>
+                <ColumnDefinition Width="140"/>
+                <ColumnDefinition Width="140"/>
+                <ColumnDefinition Width="140"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+            <Button x:Name="ProcessButton" Grid.Column="0" Content="Process sellout file" Margin="10,10,5,10" AutomationProperties.HelpText="Process the loaded data" Click="ProcessButton_Click" IsEnabled="False"/>
+            <Button x:Name="ExportButton" Grid.Column="1" Content="Save results" Margin="5,10,5,10" AutomationProperties.HelpText="Save the processed results to the billing file" Click="ExportButton_Click" IsEnabled="False"/>
+            <Button x:Name="ExportNewBillingButton" Grid.Column="2" Content="Save new billing" Margin="5,10,5,10" AutomationProperties.HelpText="Save the new billing file with updated PcsLeft" Click="ExportNewBillingButton_Click" IsEnabled="False"/>
+            <Button x:Name="ExportFailedButton" Content="Save failed rows" Grid.Column="3" Margin="5,10,10,10" AutomationProperties.HelpText="Save the rows that failed processing to a separate file" Click="ExportFailedButton_Click" IsEnabled="False"/>
         </Grid>
     </Grid>
 </Window>

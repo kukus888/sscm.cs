@@ -361,11 +361,14 @@ namespace sscm
                         selloutItem.Status = "Warning: Not enough billing quantity, assigned " + assignedQty + " / " + selloutItem.UploadQty;
                     }
                     selloutItem.ColorStatus = "Error";
+                    selloutItem.NotFoundQty = selloutItemLeft;
                 }
             }
             BillingDataGrid.Items.Refresh();
             ProcessButton.IsEnabled = false;
             ExportButton.IsEnabled = true;
+            ExportFailedButton.IsEnabled = true;
+            ExportNewBillingButton.IsEnabled = true;
         }
 
         private void ExportButton_Click(object sender, RoutedEventArgs e)
@@ -459,6 +462,190 @@ namespace sscm
             }
             exportWorkbook.Close();
         }
+
+        private void ExportNewBillingButton_Click(object sender, RoutedEventArgs e)
+        {
+            // Create new excel file
+            var exportWorkbook = xlApp.Workbooks.Add(Type.Missing);
+            var exportSheet = (Excel.Worksheet)exportWorkbook.Sheets[1];
+            exportSheet.Name = "Billing";
+            // Copy the entire billing table
+            Excel.Range UsedCells = xlBillingTable.UsedRange;
+            int RangeX = UsedCells.End[Excel.XlDirection.xlToRight].Column;
+            int RangeY = UsedCells.End[Excel.XlDirection.xlDown].Row;
+            int billingNoColumn = 0;
+            int PcsLeftColumn = 0;
+            
+            for (int x = 1; x <= RangeX; x++)//nacist do Array
+            {
+                Excel.Range cell = (Excel.Range)UsedCells.Cells[1, x];
+                if ((string)cell.Text == "Billing No.")
+                {
+                    billingNoColumn = x;
+                }
+                if ((string)cell.Text == "Pcs left")
+                {
+                    PcsLeftColumn = x;
+                }
+            }
+            // Copy headers
+            for (int col = 1; col <= RangeX; col++)
+            {
+                Excel.Range cell = (Excel.Range)UsedCells.Cells[1, col];
+                exportSheet.Cells[1, col] = cell.Text;
+            }
+            // Add Pcs used header
+            int PcsUsedColumn = RangeX + 1;
+            Excel.Range PcsUsedheaderCell = (Excel.Range)UsedCells.Cells[1, PcsUsedColumn];
+            exportSheet.Cells[1, PcsUsedColumn] = "Pcs used";
+            // Copy data
+            for (int row = 2; row <= RangeY; row++)
+            {
+                Excel.Range billingNoRng = (Excel.Range)xlBillingTable.Cells[row, billingNoColumn];
+                string BillingNo = (string)billingNoRng.Cells.Value;
+                // Find corresponding billing item
+                var billingItem = BillingItems.FirstOrDefault(b => b.BillingNo == BillingNo);
+                for (int col = 1; col <= RangeX; col++)
+                {
+                    Excel.Range cell = (Excel.Range)UsedCells.Cells[row, col];
+                    if (col == PcsLeftColumn)
+                    {
+                        if (billingItem != null)
+                        {
+                            exportSheet.Cells[row, col] = billingItem.PcsLeft.ToString();
+                        } else
+                        {
+                            exportSheet.Cells[row, col] = cell.Text;
+                        }
+                        continue;
+                    } else
+                    {
+                        exportSheet.Cells[row, col] = cell.Text;
+                    }
+                }
+                // Add Pcs used value
+                if (billingItem != null)
+                {
+                    int pcsUsed = (int)(billingItem.SelloutQty);
+                    exportSheet.Cells[row, PcsUsedColumn] = pcsUsed.ToString();
+                }
+                // Lastly, copy color of the row based on the original file if not white
+                Excel.Range sourceRow = (Excel.Range)xlBillingTable.Rows[row];
+                Excel.Range targetRow = (Excel.Range)exportSheet.Rows[row];
+                double srcColor = (double)sourceRow.Interior.Color;
+                if (srcColor != 16777215)
+                {
+                    targetRow.Interior.Color = sourceRow.Interior.Color;
+                }
+            }
+            // Autosize columns
+            exportSheet.Columns.AutoFit();
+            // Save file dialog
+            SaveFileDialog saveFileDialog = new SaveFileDialog();
+            saveFileDialog.Filter = "Excel Files|*.xlsx;*.xls";
+            saveFileDialog.Title = "Save the processed billing file";
+            saveFileDialog.ShowDialog();
+            if (saveFileDialog.FileName != null || saveFileDialog.FileName != "")
+            {
+                try
+                {
+                    exportWorkbook.SaveAs(saveFileDialog.FileName);
+                    MessageBox.Show("File saved successfully.", "Success", MessageBoxButton.OK, MessageBoxImage.Information);
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show(ex.Message, ex.ToString(), MessageBoxButton.OK, MessageBoxImage.Error);
+                }
+            }
+            exportWorkbook.Close();
+        }
+
+        private void ExportFailedButton_Click(object sender, RoutedEventArgs e)
+        {
+            // Create new excel file
+            var exportWorkbook = xlApp.Workbooks.Add(Type.Missing);
+            var exportSheet = (Excel.Worksheet)exportWorkbook.Sheets[1];
+            exportSheet.Name = "Failed rows";
+            // For each item SelloutItem in SelloutItems, grab the SelloutItem's billing no's
+            Excel.Range UsedCells = xlSelloutTable.UsedRange;
+            int RangeX = UsedCells.End[Excel.XlDirection.xlToRight].Column;
+            int RangeY = UsedCells.End[Excel.XlDirection.xlDown].Row;
+            string[] HeaderKeys = new string[RangeX+1];
+            int ConditionColumn = 0;
+            int MaterialColumn = 0;
+            for (int x = 1; x <= RangeX; x++)//nacist do Array
+            {
+                Excel.Range cell = (Excel.Range)UsedCells.Cells[1, x];
+                if ((string)cell.Text == "Condition Document No")
+                {
+                    ConditionColumn = x;
+                }
+                if ((string)cell.Text == "Material")
+                {
+                    MaterialColumn = x;
+                }
+                HeaderKeys[x]= (string)cell.Text;
+            }
+            // Write headers to new excel
+            for (int j = 1; j <= HeaderKeys.Length-1; j++)
+            {
+                exportSheet.Cells[1, j] = HeaderKeys[j];
+            }
+            // Add Pcs not assigned and info header
+            int PcsNotAssignedColumn = RangeX + 1;
+            exportSheet.Cells[1, PcsNotAssignedColumn] = "Pcs Not Assigned";
+            int InfoColumn = RangeX + 2;
+            exportSheet.Cells[1, InfoColumn] = "Info";
+            // Find all failed sellout items
+            var failedSelloutItems = SelloutItems.Where(s => s.ColorStatus == "Error").ToList();
+            // Write the failed items to the new excel
+            for (int itemIndex = 0; itemIndex < failedSelloutItems.Count; itemIndex++)
+            {
+                var selloutItem = failedSelloutItems[itemIndex];
+                int rowIndex = 2 + itemIndex;
+                // Find the row in the original excel
+                for (int row = 2; row <= RangeY; row++)
+                {
+                    Excel.Range conditionRng = (Excel.Range)xlSelloutTable.Cells[row, ConditionColumn];
+                    string conditionNo = (string)conditionRng.Cells.Value;
+                    Excel.Range materialRng = (Excel.Range)xlSelloutTable.Cells[row, MaterialColumn];
+                    string materialNo = (string)materialRng.Cells.Value;
+                    if (conditionNo == selloutItem.ConditionDocumentNo && materialNo == selloutItem.Material)
+                    {
+                        // We found the row, copy it
+                        for (int col = 1; col <= RangeX; col++)
+                        {
+                            Excel.Range cell = (Excel.Range)UsedCells.Cells[row, col];
+                            exportSheet.Cells[rowIndex, col] = cell.Text;
+                        }
+                        // Add Pcs not assigned and info
+                        exportSheet.Cells[rowIndex, PcsNotAssignedColumn] = selloutItem.NotFoundQty.ToString();
+                        exportSheet.Cells[rowIndex, InfoColumn] = selloutItem.Status;
+                        break; // Move to next sellout item
+                    }
+                }
+            }
+            // Autosize columns
+            exportSheet.Columns.AutoFit();
+            // Save file dialog
+            SaveFileDialog saveFileDialog = new SaveFileDialog();
+            saveFileDialog.Filter = "Excel Files|*.xlsx;*.xls";
+            saveFileDialog.Title = "Save the failed assignments file";
+            saveFileDialog.ShowDialog();
+            if (saveFileDialog.FileName != null || saveFileDialog.FileName != "")
+            {
+                try
+                {
+                    exportWorkbook.SaveAs(saveFileDialog.FileName);
+                    MessageBox.Show("File saved successfully.", "Success", MessageBoxButton.OK, MessageBoxImage.Information);
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show(ex.Message, ex.ToString(), MessageBoxButton.OK, MessageBoxImage.Error);
+                }
+            }
+            exportWorkbook.Close();
+        }
     }
     public class BillingItem
     {
@@ -479,6 +666,7 @@ namespace sscm
         public string Material { get; set; }
         public double UploadQty { get; set; }
         public string Status { get; set; }
+        public double NotFoundQty { get; set; }
         /// <summary>
         /// Sets the color of the row based on the status
         /// Error = Red
