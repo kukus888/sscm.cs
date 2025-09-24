@@ -1,5 +1,7 @@
 ﻿using Microsoft.Win32;
 using System.Collections.ObjectModel;
+using System.IO;
+using System.Reflection;
 using System.Text;
 using System.Windows;
 using System.Windows.Controls;
@@ -8,6 +10,7 @@ using System.Windows.Documents;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
+using System.Windows.Media.Media3D;
 using System.Windows.Navigation;
 using System.Windows.Shapes;
 using Excel = Microsoft.Office.Interop.Excel;
@@ -28,6 +31,7 @@ namespace sscm
         Brush BrushOK = new SolidColorBrush(Color.FromRgb(179, 226, 131));
         Brush BrushFAIL = new SolidColorBrush(Colors.Red);
         Brush BrushWARN = new SolidColorBrush(Colors.Orange);
+        public string BillingFilePath = "";
         public ObservableCollection<BillingItem> BillingItems = new ObservableCollection<BillingItem>();
         public ObservableCollection<SelloutItem> SelloutItems = new ObservableCollection<SelloutItem>();
         public MainWindow()
@@ -43,105 +47,131 @@ namespace sscm
             openFileDialog.ShowDialog();
             if (openFileDialog.FileName != null || openFileDialog.FileName != "")
             {
-                object misValue = System.Reflection.Missing.Value;
                 sender.GetType().GetProperty("IsEnabled").SetValue(sender, false);
-                xlApp = new Excel.Application();
-                try
+                Thread t = new Thread(() => T_LoadSellout(openFileDialog.FileName));
+                t.Name = "LoadSelloutThread";
+                t.Start();
+            }
+
+        }
+        private void T_LoadSellout(string filename)
+        {
+            object misValue = System.Reflection.Missing.Value;
+            xlApp = new Excel.Application();
+            try
+            {
+                xlSelloutWorkbook = xlApp.Workbooks.Open(filename, 0, false, 5, "", "", true, Microsoft.Office.Interop.Excel.XlPlatform.xlWindows, "\t", false, false, 0, true, 1, 0);
+                xlSelloutTable = (Excel.Worksheet)xlSelloutWorkbook.Worksheets.get_Item(1);
+                SelloutExcelLabel.Dispatcher.Invoke(() => {
+                    SelloutExcelLabel.Text = "Loading data...";
+                });
+                // Get headers
+                Excel.Range UsedCells = xlSelloutTable.UsedRange;
+                int RangeX = UsedCells.End[Excel.XlDirection.xlToRight].Column;
+                int RangeY = UsedCells.End[Excel.XlDirection.xlDown].Row;
+                string[] HeaderKeys = new string[RangeX+1];
+                for (int x = 1; x <= RangeX; x++)//nacist do Array
                 {
-                    xlSelloutWorkbook = xlApp.Workbooks.Open(openFileDialog.FileName, 0, false, 5, "", "", true, Microsoft.Office.Interop.Excel.XlPlatform.xlWindows, "\t", false, false, 0, true, 1, 0);
-                    xlSelloutTable = (Excel.Worksheet)xlSelloutWorkbook.Worksheets.get_Item(1);
-                    SelloutExcelLabel.Text = openFileDialog.FileName.Split("\\").Last();
-                    // Get headers
-                    Excel.Range UsedCells = xlSelloutTable.UsedRange;
-                    int RangeX = UsedCells.End[Excel.XlDirection.xlToRight].Column;
-                    int RangeY = UsedCells.End[Excel.XlDirection.xlDown].Row;
-                    string[] HeaderKeys = new string[RangeX+1];
-                    for (int x = 1; x <= RangeX; x++)//nacist do Array
+                    Excel.Range cell = (Excel.Range)UsedCells.Cells[1, x];
+                    HeaderKeys[x]= (string)cell.Text;
+                }
+                // Load Table Data
+                for (int i = 2; i <= RangeY; i++)
+                {
+                    SelloutExcelLabel.Dispatcher.Invoke(() => {
+                        SelloutExcelLabel.Text = "Loading row " + i + " / " + RangeY;
+                    });
+                    SelloutItem it = new SelloutItem();
+                    // Check: Some rows are empty (intermediate summary rows), we need to omit them
+                    Excel.Range rngc = (Excel.Range)xlSelloutTable.Cells[i, 1];
+                    if (rngc.Cells.Value == null || rngc.Cells.Value == "")
                     {
-                        Excel.Range cell = (Excel.Range)UsedCells.Cells[1, x];
-                        HeaderKeys[x]= (string)cell.Text;
+                        continue;
                     }
-                    // Load Table Data
-                    for (int i = 2; i <= RangeY; i++)
+                    for (int j = 1; j <= HeaderKeys.Length-1; j++)
                     {
-                        SelloutItem it = new SelloutItem();
-                        // Check: Some rows are empty (intermediate summary rows), we need to omit them
-                        Excel.Range rngc = (Excel.Range)xlSelloutTable.Cells[i, 1];
-                        if (rngc.Cells.Value == null || rngc.Cells.Value == "")
+                        Excel.Range rng = (Excel.Range)xlSelloutTable.Cells[i, j];
+                        try
                         {
-                            continue;
-                        }
-                        for (int j = 1; j <= HeaderKeys.Length-1; j++)
-                        {
-                            Excel.Range rng = (Excel.Range)xlSelloutTable.Cells[i, j];
-                            try
+                            switch (HeaderKeys[j])
                             {
-                                switch (HeaderKeys[j])
-                                {
-                                    case "Upload date":
-                                        it.UploadDate = (System.DateTime)rng.Cells.Value;
-                                        break;
-                                    case "Condition Document No":
-                                        it.ConditionDocumentNo = (string)rng.Cells.Value;
-                                        break;
-                                    case "Start Date of Condition":
-                                        it.ConditionStartDate = (System.DateTime)rng.Cells.Value;
-                                        break;
-                                    case "End Date of Condition":
-                                        it.ConditionEndDate = (System.DateTime)rng.Cells.Value;
-                                        break;
-                                    case "Customer":
-                                        it.Customer = (string)rng.Cells.Value;
-                                        break;
-                                    case "Material":
-                                        it.Material = (string)rng.Cells.Value;
-                                        break;
-                                    case "Upload Qty":
-                                        try
-                                        {
-                                            it.UploadQty = (double)rng.Cells.Value;
-                                        } catch (System.InvalidCastException)
-                                        {
-                                            // Try to convert from string
-                                            string val = (string)rng.Cells.Value;
-                                            it.UploadQty = double.Parse(val, System.Globalization.CultureInfo.InvariantCulture);
-                                        }
-                                        break;
-                                }
-                            }
-                            catch (System.InvalidCastException ex)
-                            {
-                                MessageBox.Show($"Error processing row {i}, column {HeaderKeys[j]}: {ex.Message}. Row will be omitted, please edit the excel source file.", "Data Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                                case "Upload date":
+                                    it.UploadDate = (System.DateTime)rng.Cells.Value;
+                                    break;
+                                case "Condition Document No":
+                                    it.ConditionDocumentNo = (string)rng.Cells.Value;
+                                    break;
+                                case "Start Date of Condition":
+                                    it.ConditionStartDate = (System.DateTime)rng.Cells.Value;
+                                    break;
+                                case "End Date of Condition":
+                                    it.ConditionEndDate = (System.DateTime)rng.Cells.Value;
+                                    break;
+                                case "Customer":
+                                    it.Customer = (string)rng.Cells.Value;
+                                    break;
+                                case "Material":
+                                    it.Material = (string)rng.Cells.Value;
+                                    break;
+                                case "Upload Qty":
+                                    try
+                                    {
+                                        it.UploadQty = (double)rng.Cells.Value;
+                                    }
+                                    catch (System.InvalidCastException)
+                                    {
+                                        // Try to convert from string
+                                        string val = (string)rng.Cells.Value;
+                                        it.UploadQty = double.Parse(val, System.Globalization.CultureInfo.InvariantCulture);
+                                    }
+                                    break;
+                                default:
+                                    continue;
                             }
                         }
-                        SelloutItems.Add(it);
+                        catch (System.InvalidCastException ex)
+                        {
+                            MessageBox.Show($"Error processing row {i}, column {HeaderKeys[j]}: {ex.Message}. Row will be omitted, please edit the excel source file.", "Data Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                        }
                     }
+                    SelloutItems.Add(it);
                 }
-                catch (System.Runtime.InteropServices.COMException ex)
-                {//nejaka chyba ups
-                    MessageBox.Show(ex.Message, ex.StackTrace);
-                }
-                catch (NullReferenceException ex)
-                {//soubor nevybran
-                    MessageBox.Show(ex.Message, ex.StackTrace);
-                }
+            }
+            catch (System.Runtime.InteropServices.COMException ex)
+            {//nejaka chyba ups
+                MessageBox.Show(ex.Message, ex.StackTrace);
+            }
+            catch (NullReferenceException ex)
+            {//soubor nevybran
+                MessageBox.Show(ex.Message, ex.StackTrace);
             }
             // Get unique customers
             var customers = SelloutItems.Select(i => i.Customer).Distinct().ToList();
             if (customers.Count > 1)
             {
+                SelloutExcelLabel.Dispatcher.Invoke(() => {
+                    SelloutExcelLabel.Text = "There are multiple companies in the sellout file. Please ensure there is only one company.";
+                });
                 MessageBox.Show("There are multiple companies in the sellout file. Please ensure there is only one company.", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
                 return;
-            } else
+            }
+            else
             {
                 SelectedCustomer = int.Parse(customers[0]);
             }
-            SelloutDataGrid.ItemsSource = SelloutItems;
+            SelloutDataGrid.Dispatcher.Invoke(() => {
+                SelloutDataGrid.ItemsSource = SelloutItems;
+            });
             if (BillingItems.Count > 0)
             {
-                FilterBillingBySoldToNumber(customers[0]);
-                ProcessButton.IsEnabled = true;
+                ProcessButton.Dispatcher.Invoke(() => {
+                    FilterBillingBySoldToNumber(customers[0]);
+                    ProcessButton.IsEnabled = true;
+                });
             }
+            SelloutExcelLabel.Dispatcher.Invoke(() => {
+                SelloutExcelLabel.Text = filename.Split("\\").Last();
+            });
         }
         private void LoadBillingButton_Click(object sender, RoutedEventArgs e)
         {
@@ -150,86 +180,118 @@ namespace sscm
             openFileDialog.ShowDialog();
             if (openFileDialog.FileName != null || openFileDialog.FileName != "")
             {
-                object misValue = System.Reflection.Missing.Value;
                 sender.GetType().GetProperty("IsEnabled").SetValue(sender, false);
-                xlApp = new Excel.Application();
-                try
-                {
-                    xlBillingWorkbook = xlApp.Workbooks.Open(openFileDialog.FileName, 0, false, 5, "", "", true, Microsoft.Office.Interop.Excel.XlPlatform.xlWindows, "\t", false, false, 0, true, 1, 0);
-                    xlBillingTable = (Excel.Worksheet)xlBillingWorkbook.Worksheets.get_Item(1);
-                    BillingExcelLabel.Text = openFileDialog.FileName.Split("\\").Last();
-                    // Get headers
-                    Excel.Range UsedCells = xlBillingTable.UsedRange;
-                    int RangeX = UsedCells.End[Excel.XlDirection.xlToRight].Column;
-                    int RangeY = xlBillingTable.UsedRange.End[Excel.XlDirection.xlDown].Row;
-                    string[] HeaderKeys = new string[RangeX+1];
-                    for (int x = 1; x <= RangeX; x++)//nacist do Array
-                    {
-                        Excel.Range cell = (Excel.Range)UsedCells.Cells[1, x];
-                        HeaderKeys[x]= (string)cell.Text;
-                    }
-                    // Load Table Data
-                    for (int i = 2; i <= RangeY; i++)
-                    {
-                        BillingItem it = new BillingItem();
-                        for (int j = 1; j <= HeaderKeys.Length-1; j++)
-                        {
-                            Excel.Range rng = (Excel.Range)xlBillingTable.Cells[i, j];
-                            try
-                            {
-                                switch (HeaderKeys[j])
-                                {
-                                    case "Sold-to":
-                                        it.SoldTo = (string)rng.Cells.Value;
-                                        // Strip leading zeroes
-                                        it.SoldTo = it.SoldTo.TrimStart('0');
-                                        break;
-                                    case "Billing No.":
-                                        it.BillingNo = (string)rng.Cells.Value;
-                                        break;
-                                    case "Material":
-                                        it.Material = (string)rng.Cells.Value;
-                                        break;
-                                    case "Billing Qty":
-                                        it.BillingQty = (double)rng.Cells.Value;
-                                        break;
-                                    case "Pcs left":
-                                        if (rng.Cells.Value == null)
-                                        {
-                                            it.PcsLeft = it.BillingQty;
-                                        }
-                                        else
-                                        {
-                                            it.PcsLeft = (double)rng.Cells.Value;
-                                        }
-                                        break;
-                                }
-                            } catch (System.InvalidCastException ex)
-                            {
-                                MessageBox.Show($"Error processing row {i}, column {HeaderKeys[j]}: {ex.Message}. Row will be omitted, please edit the excel source file.", "Data Error", MessageBoxButton.OK, MessageBoxImage.Error);
-                            }
-                        }
-                        BillingItems.Add(it);
-                    }
-                }
-                catch (System.Runtime.InteropServices.COMException ex)
-                {//nejaka chyba ups
-                    MessageBox.Show(ex.Message, ex.StackTrace);
-                }
-                catch (NullReferenceException ex)
-                {//soubor nevybran
-                    MessageBox.Show(ex.Message, ex.StackTrace);
-                }
+                Thread t = new Thread(() => T_LoadBilling(openFileDialog.FileName));
+                t.Name = "LoadBillingThread";
+                t.Start();
             }
             if (SelectedCustomer != 0)
             {
                 FilterBillingBySoldToNumber(SelectedCustomer.ToString());
             }
-            BillingDataGrid.ItemsSource = BillingItems;
+        }
+        private void T_LoadBilling(string filename)
+        {
+            object misValue = System.Reflection.Missing.Value;
+            xlApp = new Excel.Application();
+            try
+            {
+                xlBillingWorkbook = xlApp.Workbooks.Open(filename, 0, false, 5, "", "", true, Microsoft.Office.Interop.Excel.XlPlatform.xlWindows, "\t", false, false, 0, true, 1, 0);
+                xlBillingTable = (Excel.Worksheet)xlBillingWorkbook.Worksheets.get_Item(1);
+                BillingExcelLabel.Dispatcher.Invoke(() => {
+                    BillingExcelLabel.Text = "Loading data...";
+                });
+                // Get headers
+                Excel.Range UsedCells = xlBillingTable.UsedRange;
+                int RangeX = UsedCells.End[Excel.XlDirection.xlToRight].Column;
+                int RangeY = xlBillingTable.UsedRange.End[Excel.XlDirection.xlDown].Row;
+                string[] HeaderKeys = new string[RangeX+1];
+                for (int x = 1; x <= RangeX; x++)//nacist do Array
+                {
+                    Excel.Range cell = (Excel.Range)UsedCells.Cells[1, x];
+                    HeaderKeys[x]= (string)cell.Text;
+                }
+                // Load Table Data
+                for (int i = 2; i <= RangeY; i++)
+                {
+                    BillingExcelLabel.Dispatcher.Invoke(() => {
+                        BillingExcelLabel.Text = "Loading row " + i + " / " + RangeY;
+                    });
+                    BillingItem it = new BillingItem();
+                    for (int j = 1; j <= HeaderKeys.Length-1; j++)
+                    {
+                        Excel.Range rng = (Excel.Range)xlBillingTable.Cells[i, j];
+                        try
+                        {
+                            switch (HeaderKeys[j])
+                            {
+                                case "Sold-to":
+                                    it.SoldTo = (string)rng.Cells.Value;
+                                    // Strip leading zeroes
+                                    it.SoldTo = it.SoldTo.TrimStart('0');
+                                    break;
+                                case "Billing No.":
+                                    it.BillingNo = (string)rng.Cells.Value;
+                                    break;
+                                case "Material":
+                                    it.Material = (string)rng.Cells.Value;
+                                    break;
+                                case "Billing Qty":
+                                    it.BillingQty = (double)rng.Cells.Value;
+                                    break;
+                                case "Pcs left":
+                                    if (rng.Cells.Value == null)
+                                    {
+                                        it.PcsLeft = it.BillingQty;
+                                    }
+                                    else
+                                    {
+                                        // Try casting into double
+                                        try
+                                        {
+                                            it.PcsLeft = (double)rng.Cells.Value;
+                                        }
+                                        catch (System.InvalidCastException)
+                                        {
+                                            // Try to convert from string
+                                            string val = (string)rng.Cells.Value;
+                                            it.PcsLeft = double.Parse(val, System.Globalization.CultureInfo.InvariantCulture);
+                                        }
+                                    }
+                                    break;
+                            }
+                        }
+                        catch (System.InvalidCastException ex)
+                        {
+                            MessageBox.Show($"Error processing row {i}, column {HeaderKeys[j]}: {ex.Message}. Row will be omitted, please edit the excel source file.", "Data Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                        }
+                    }
+                    BillingItems.Add(it);
+                }
+            }
+            catch (System.Runtime.InteropServices.COMException ex)
+            {//nejaka chyba ups
+                MessageBox.Show(ex.Message, ex.StackTrace);
+                return;
+            }
+            catch (NullReferenceException ex)
+            {//soubor nevybran
+                MessageBox.Show(ex.Message, ex.StackTrace);
+                return;
+            }
+            BillingFilePath = filename;
+            BillingDataGrid.Dispatcher.Invoke(() => {
+                BillingDataGrid.ItemsSource = BillingItems;
+            });
             if (SelloutItems.Count > 0)
             {
-                ProcessButton.IsEnabled = true;
+                ProcessButton.Dispatcher.Invoke(() => {
+                    ProcessButton.IsEnabled = true;
+                });
             }
+            BillingExcelLabel.Dispatcher.Invoke(() => {
+                BillingExcelLabel.Text = filename.Split("\\").Last();
+            });
         }
         void CloseResources(object sender, EventArgs e)
         {
@@ -341,7 +403,7 @@ namespace sscm
                             if (selloutItemLeft > 0) // Only log if we actually allocated something, sometimnes we may come here with 0 billing qty left
                             {
                                 selloutItem.Status += "[" + billingItem.BillingNo + " - " + selloutItemLeft + " pc]";
-                                billingItem.SelloutQty += selloutItemLeft; 
+                                billingItem.SelloutQty += selloutItemLeft;
                             }
                             selloutItemLeft = 0;
                             break;
@@ -373,10 +435,19 @@ namespace sscm
 
         private void ExportButton_Click(object sender, RoutedEventArgs e)
         {
+            Thread T = new Thread(() => T_Export());
+            T.Name = "ExportThread";
+            T.Start();
+        }
+        private void T_Export()
+        {
             // Create new excel file
             var exportWorkbook = xlApp.Workbooks.Add(Type.Missing);
             var exportSheet = (Excel.Worksheet)exportWorkbook.Sheets[1];
             exportSheet.Name = "Billing";
+            StatusLabel.Dispatcher.Invoke(() => {
+                StatusLabel.Text = "Exporting results...";
+            });
             // For each item SelloutItem in SelloutItems, grab the SelloutItem's billing no's
             Excel.Range UsedCells = xlBillingTable.UsedRange;
             int RangeX = UsedCells.End[Excel.XlDirection.xlToRight].Column;
@@ -384,12 +455,25 @@ namespace sscm
             string[] HeaderKeys = new string[RangeX+1];
             int billingNoColumn = 0;
             int PcsLeftColumn = 0;
+            int soldToColumn = 0;
+            int materialColumn = 0;
             for (int x = 1; x <= RangeX; x++)//nacist do Array
             {
+                StatusLabel.Dispatcher.Invoke(() => {
+                    StatusLabel.Text = "Reading headers...";
+                });
                 Excel.Range cell = (Excel.Range)UsedCells.Cells[1, x];
                 if ((string)cell.Text == "Billing No.")
                 {
                     billingNoColumn = x;
+                }
+                if ((string)cell.Text == "Sold-to")
+                {
+                    soldToColumn = x;
+                }
+                if ((string)cell.Text == "Material")
+                {
+                    materialColumn = x;
                 }
                 if ((string)cell.Text == "Pcs left")
                 {
@@ -398,6 +482,9 @@ namespace sscm
                 }
                 HeaderKeys[x]= (string)cell.Text;
             }
+            StatusLabel.Dispatcher.Invoke(() => {
+                StatusLabel.Text = "Export results: Writing new excel...";
+            });
             // Write headers to new excel
             for (int j = 1; j <= HeaderKeys.Length-1; j++)
             {
@@ -407,16 +494,25 @@ namespace sscm
             exportSheet.Cells[1, RangeX + 1] = "Sell-out qty";
             int rowIndex = 2;
             // Copy Table Data
-            for (int i = 2; i <= RangeY; i++)
+            for (int row = 2; row <= RangeY; row++)
             {
-                var rowStart = xlBillingTable.Cells[i, 1];
-                var rowEnd = xlBillingTable.Cells[i, RangeX];
+                StatusLabel.Dispatcher.Invoke(() => {
+                    StatusLabel.Text = "Exporting results: row " + row + " / " + RangeY;
+                });
+                var rowStart = xlBillingTable.Cells[row, 1];
+                var rowEnd = xlBillingTable.Cells[row, RangeX];
                 Excel.Range rangeRow = xlBillingTable.Range[rowStart, rowEnd];
                 // Get Billing No from this row
-                Excel.Range billingNoRng = (Excel.Range)xlBillingTable.Cells[i, billingNoColumn];
+                Excel.Range billingNoRng = (Excel.Range)xlBillingTable.Cells[row, billingNoColumn];
                 string BillingNo = (string)billingNoRng.Cells.Value;
+                Excel.Range soldToRng = (Excel.Range)xlBillingTable.Cells[row, soldToColumn];
+                string SoldTo = (string)soldToRng.Cells.Value;
+                // Soldto can have leading 000, we have to strip them
+                SoldTo = SoldTo.TrimStart('0');
+                Excel.Range materialRng = (Excel.Range)xlBillingTable.Cells[row, materialColumn];
+                string Material = (string)materialRng.Cells.Value;
                 // Find the billing item in the BillingItems collection
-                var billingItem = BillingItems.FirstOrDefault(b => b.BillingNo == BillingNo);
+                var billingItem = BillingItems.FirstOrDefault(b => b.BillingNo == BillingNo && b.SoldTo == SoldTo && b.Material == Material);
                 if (billingItem == null)
                 {
                     // This billing item was not in the original list, skip it
@@ -461,21 +557,37 @@ namespace sscm
                 }
             }
             exportWorkbook.Close();
+            StatusLabel.Dispatcher.Invoke(() => {
+                StatusLabel.Text = "Export results complete";
+            });
         }
 
         private void ExportNewBillingButton_Click(object sender, RoutedEventArgs e)
         {
+            Thread T = new Thread(() => T_ExportBilling());
+            T.Name = "ExportNewBillingThread";
+            T.Start();
+        }
+        private void T_ExportBilling()
+        {
+            // Copy the old billing file into a new one, but update the Pcs left column
+            string newPath = BillingFilePath.Replace(".xls", "_processed.xls");
+            File.Copy(BillingFilePath, newPath);
             // Create new excel file
-            var exportWorkbook = xlApp.Workbooks.Add(Type.Missing);
+            var exportWorkbook = xlApp.Workbooks.Open(newPath, 0, false, 5, "", "", true, Microsoft.Office.Interop.Excel.XlPlatform.xlWindows, "\t", false, false, 0, true, 1, 0);
             var exportSheet = (Excel.Worksheet)exportWorkbook.Sheets[1];
-            exportSheet.Name = "Billing";
-            // Copy the entire billing table
+            // Find headers we want
             Excel.Range UsedCells = xlBillingTable.UsedRange;
             int RangeX = UsedCells.End[Excel.XlDirection.xlToRight].Column;
             int RangeY = UsedCells.End[Excel.XlDirection.xlDown].Row;
             int billingNoColumn = 0;
+            int soldToColumn = 0;
+            int materialColumn = 0;
             int PcsLeftColumn = 0;
-            
+            int PcsUsedColumn = -1;
+            StatusLabel.Dispatcher.Invoke(() => {
+                StatusLabel.Text = "Exporting new billing file...";
+            });
             for (int x = 1; x <= RangeX; x++)//nacist do Array
             {
                 Excel.Range cell = (Excel.Range)UsedCells.Cells[1, x];
@@ -483,85 +595,81 @@ namespace sscm
                 {
                     billingNoColumn = x;
                 }
+                if ((string)cell.Text == "Sold-to")
+                {
+                    soldToColumn = x;
+                }
+                if ((string)cell.Text == "Material")
+                {
+                    materialColumn = x;
+                }
                 if ((string)cell.Text == "Pcs left")
                 {
                     PcsLeftColumn = x;
                 }
+                if ((string)cell.Text == "Pcs used")
+                {
+                    PcsUsedColumn = x;
+                }
             }
-            // Copy headers
-            for (int col = 1; col <= RangeX; col++)
+            // Add Pcs used header if not present
+            if (PcsUsedColumn == -1)
             {
-                Excel.Range cell = (Excel.Range)UsedCells.Cells[1, col];
-                exportSheet.Cells[1, col] = cell.Text;
+                PcsUsedColumn = RangeX + 1;
+                Excel.Range PcsUsedheaderCell = (Excel.Range)UsedCells.Cells[1, PcsUsedColumn];
+                exportSheet.Cells[1, PcsUsedColumn] = "Pcs used";
             }
-            // Add Pcs used header
-            int PcsUsedColumn = RangeX + 1;
-            Excel.Range PcsUsedheaderCell = (Excel.Range)UsedCells.Cells[1, PcsUsedColumn];
-            exportSheet.Cells[1, PcsUsedColumn] = "Pcs used";
-            // Copy data
+            // based on the billing no, soldto and material column, update the Pcs left and pcs used column
             for (int row = 2; row <= RangeY; row++)
             {
+                StatusLabel.Dispatcher.Invoke(() => {
+                    StatusLabel.Text = "Exporting new billing file: row " + row + " / " + RangeY;
+                });
                 Excel.Range billingNoRng = (Excel.Range)xlBillingTable.Cells[row, billingNoColumn];
                 string BillingNo = (string)billingNoRng.Cells.Value;
+                Excel.Range soldToRng = (Excel.Range)xlBillingTable.Cells[row, soldToColumn];
+                string SoldTo = (string)soldToRng.Cells.Value;
+                // Soldto can have leading 000, we have to strip them
+                SoldTo = SoldTo.TrimStart('0');
+                Excel.Range materialRng = (Excel.Range)xlBillingTable.Cells[row, materialColumn];
+                string Material = (string)materialRng.Cells.Value;
                 // Find corresponding billing item
-                var billingItem = BillingItems.FirstOrDefault(b => b.BillingNo == BillingNo);
-                for (int col = 1; col <= RangeX; col++)
+                var correspondingItem = BillingItems.FirstOrDefault(b => b.BillingNo == BillingNo && b.SoldTo == SoldTo && b.Material == Material);
+                if (correspondingItem != null)
                 {
-                    Excel.Range cell = (Excel.Range)UsedCells.Cells[row, col];
-                    if (col == PcsLeftColumn)
-                    {
-                        if (billingItem != null)
-                        {
-                            exportSheet.Cells[row, col] = billingItem.PcsLeft.ToString();
-                        } else
-                        {
-                            exportSheet.Cells[row, col] = cell.Text;
-                        }
-                        continue;
-                    } else
-                    {
-                        exportSheet.Cells[row, col] = cell.Text;
-                    }
-                }
-                // Add Pcs used value
-                if (billingItem != null)
-                {
-                    int pcsUsed = (int)(billingItem.SelloutQty);
+                    // Update Pcs left and Pcs used
+                    exportSheet.Cells[row, PcsLeftColumn] = correspondingItem.PcsLeft.ToString();
+                    int pcsUsed = (int)(correspondingItem.SelloutQty);
                     exportSheet.Cells[row, PcsUsedColumn] = pcsUsed.ToString();
                 }
-                // Lastly, copy color of the row based on the original file if not white
-                Excel.Range sourceRow = (Excel.Range)xlBillingTable.Rows[row];
-                Excel.Range targetRow = (Excel.Range)exportSheet.Rows[row];
-                double srcColor = (double)sourceRow.Interior.Color;
-                if (srcColor != 16777215)
-                {
-                    targetRow.Interior.Color = sourceRow.Interior.Color;
-                }
             }
-            // Autosize columns
-            exportSheet.Columns.AutoFit();
-            // Save file dialog
-            SaveFileDialog saveFileDialog = new SaveFileDialog();
-            saveFileDialog.Filter = "Excel Files|*.xlsx;*.xls";
-            saveFileDialog.Title = "Save the processed billing file";
-            saveFileDialog.ShowDialog();
-            if (saveFileDialog.FileName != null || saveFileDialog.FileName != "")
+            // save file
+            try
             {
-                try
-                {
-                    exportWorkbook.SaveAs(saveFileDialog.FileName);
-                    MessageBox.Show("File saved successfully.", "Success", MessageBoxButton.OK, MessageBoxImage.Information);
-                }
-                catch (Exception ex)
-                {
-                    MessageBox.Show(ex.Message, ex.ToString(), MessageBoxButton.OK, MessageBoxImage.Error);
-                }
+                exportWorkbook.Save();
+                var filename = newPath.Split('/').Last();
+                MessageBox.Show("File saved successfully as " + filename, "Success", MessageBoxButton.OK, MessageBoxImage.Information);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(ex.Message, ex.ToString(), MessageBoxButton.OK, MessageBoxImage.Error);
             }
             exportWorkbook.Close();
+            StatusLabel.Dispatcher.Invoke(() => {
+                StatusLabel.Text = "Export new billing complete";
+            });
         }
-
         private void ExportFailedButton_Click(object sender, RoutedEventArgs e)
         {
+            Thread T = new Thread(() => T_ExportFailed());
+            T.Name = "ExportFailedThread";
+            T.Start();
+        }
+        private void T_ExportFailed()
+        {
+            StatusLabel.Dispatcher.Invoke(() => {
+                StatusLabel.Text = "Exporting failed assignments...";
+            });
             // Create new excel file
             var exportWorkbook = xlApp.Workbooks.Add(Type.Missing);
             var exportSheet = (Excel.Worksheet)exportWorkbook.Sheets[1];
@@ -601,6 +709,9 @@ namespace sscm
             // Write the failed items to the new excel
             for (int itemIndex = 0; itemIndex < failedSelloutItems.Count; itemIndex++)
             {
+                StatusLabel.Dispatcher.Invoke(() => {
+                    StatusLabel.Text = "Exporting failed assignments: item " + (itemIndex + 1) + " / " + failedSelloutItems.Count;
+                });
                 var selloutItem = failedSelloutItems[itemIndex];
                 int rowIndex = 2 + itemIndex;
                 // Find the row in the original excel
@@ -645,6 +756,9 @@ namespace sscm
                 }
             }
             exportWorkbook.Close();
+            StatusLabel.Dispatcher.Invoke(() => {
+                StatusLabel.Text = "Export failed assignments complete";
+            });
         }
     }
     public class BillingItem

@@ -67,6 +67,7 @@
             <Button x:Name="ExportButton" Grid.Column="1" Content="Save results" Margin="5,10,5,10" AutomationProperties.HelpText="Save the processed results to the billing file" Click="ExportButton_Click" IsEnabled="False"/>
             <Button x:Name="ExportNewBillingButton" Grid.Column="2" Content="Save new billing" Margin="5,10,5,10" AutomationProperties.HelpText="Save the new billing file with updated PcsLeft" Click="ExportNewBillingButton_Click" IsEnabled="False"/>
             <Button x:Name="ExportFailedButton" Content="Save failed rows" Grid.Column="3" Margin="5,10,10,10" AutomationProperties.HelpText="Save the rows that failed processing to a separate file" Click="ExportFailedButton_Click" IsEnabled="False"/>
+            <TextBlock x:Name="StatusLabel" Grid.Column="4" Height="18" Margin="10,16,10,0" TextWrapping="Wrap" Text="Status: Waiting for input" VerticalAlignment="Top"/>
         </Grid>
     </Grid>
 </Window>
