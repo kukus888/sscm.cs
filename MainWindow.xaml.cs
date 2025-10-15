@@ -2,6 +2,7 @@
 using System.Collections.ObjectModel;
 using System.IO;
 using System.Reflection;
+using System.Security.Policy;
 using System.Text;
 using System.Windows;
 using System.Windows.Controls;
@@ -218,6 +219,7 @@ namespace sscm
                         BillingExcelLabel.Text = "Loading row " + i + " / " + RangeY;
                     });
                     BillingItem it = new BillingItem();
+                    it.Status = "";
                     for (int j = 1; j <= HeaderKeys.Length-1; j++)
                     {
                         Excel.Range rng = (Excel.Range)xlBillingTable.Cells[i, j];
@@ -255,7 +257,15 @@ namespace sscm
                                         {
                                             // Try to convert from string
                                             string val = (string)rng.Cells.Value;
-                                            it.PcsLeft = double.Parse(val, System.Globalization.CultureInfo.InvariantCulture);
+                                            // Try parsing as double with invariant culture (to handle both , and . as decimal separator), otherwise throw messagebox error
+                                            try
+                                            {
+                                                it.PcsLeft = double.Parse(val, System.Globalization.CultureInfo.InvariantCulture);
+                                            }
+                                            catch (System.FormatException)
+                                            {
+                                                MessageBox.Show($"Error processing row {i}, column {HeaderKeys[j]}: Value '{val}' is not a valid number. Row will be omitted, please edit the excel source file.", "Data Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                                            }
                                         }
                                     }
                                     break;
@@ -359,6 +369,7 @@ namespace sscm
                         if (billingItem.PcsLeft > 0)
                         {
                             selloutItem.Status += "[" + billingItem.BillingNo + " - " + billingItem.PcsLeft + " pc]";
+                            billingItem.Status += "[" + selloutItem.ConditionDocumentNo + " - " + billingItem.PcsLeft + "]";
                             billingItem.SelloutQty += billingItem.PcsLeft;
                         }
                         billingItem.PcsLeft = 0;
@@ -369,6 +380,7 @@ namespace sscm
                         billingItem.PcsLeft -= selloutItemLeft;
                         if (selloutItemLeft > 0) {
                             selloutItem.Status += "[" + billingItem.BillingNo + " - " + selloutItemLeft + " pc]";
+                            billingItem.Status += "[" + selloutItem.ConditionDocumentNo + " - " + selloutItemLeft + "]";
                             billingItem.SelloutQty += selloutItemLeft;
                         }
                         selloutItemLeft = 0;
@@ -392,6 +404,7 @@ namespace sscm
                             if (billingItem.PcsLeft > 0)
                             {
                                 selloutItem.Status += "[" + billingItem.BillingNo + " - " + billingItem.PcsLeft + " pc]";
+                                billingItem.Status += "[" + selloutItem.ConditionDocumentNo + " - " + billingItem.PcsLeft + "]";
                                 billingItem.SelloutQty += billingItem.PcsLeft;
                             }
                             billingItem.PcsLeft = 0;
@@ -403,6 +416,7 @@ namespace sscm
                             if (selloutItemLeft > 0) // Only log if we actually allocated something, sometimnes we may come here with 0 billing qty left
                             {
                                 selloutItem.Status += "[" + billingItem.BillingNo + " - " + selloutItemLeft + " pc]";
+                                billingItem.Status += "[" + selloutItem.ConditionDocumentNo + " - " + selloutItemLeft + "]";
                                 billingItem.SelloutQty += selloutItemLeft;
                             }
                             selloutItemLeft = 0;
@@ -439,6 +453,7 @@ namespace sscm
             T.Name = "ExportThread";
             T.Start();
         }
+        // Exports results
         private void T_Export()
         {
             // Create new excel file
@@ -490,9 +505,12 @@ namespace sscm
             {
                 exportSheet.Cells[1, j] = HeaderKeys[j];
             }
-            // Add Sell-out qty header
+            // Add Sell-out qty and Allocation info header
             exportSheet.Cells[1, RangeX + 1] = "Sell-out qty";
+            exportSheet.Cells[1, RangeX + 2] = "Allocation info";
             int rowIndex = 2;
+            // Create new collection from BillingItems and sort by Model number, and then by billing No
+            var sortedBillingItems = BillingItems.OrderBy(b => b.Material).ThenBy(b => b.BillingNo).ToList();
             // Copy Table Data
             for (int row = 2; row <= RangeY; row++)
             {
@@ -511,8 +529,8 @@ namespace sscm
                 SoldTo = SoldTo.TrimStart('0');
                 Excel.Range materialRng = (Excel.Range)xlBillingTable.Cells[row, materialColumn];
                 string Material = (string)materialRng.Cells.Value;
-                // Find the billing item in the BillingItems collection
-                var billingItem = BillingItems.FirstOrDefault(b => b.BillingNo == BillingNo && b.SoldTo == SoldTo && b.Material == Material);
+                // Find the billing item in the sortedBillingItems collection
+                var billingItem = sortedBillingItems.FirstOrDefault(b => b.BillingNo == BillingNo && b.SoldTo == SoldTo && b.Material == Material);
                 if (billingItem == null)
                 {
                     // This billing item was not in the original list, skip it
@@ -533,8 +551,9 @@ namespace sscm
                         exportSheet.Cells[rowIndex, j] = cell.Text;
                     }
                 }
-                // Add Sell-out qty value
+                // Add Sell-out qty and allocation info value
                 exportSheet.Cells[rowIndex, RangeX + 1] = selloutQty;
+                exportSheet.Cells[rowIndex, RangeX + 2] = billingItem.Status;
                 rowIndex++;
             }
             // Autosize columns
@@ -769,6 +788,7 @@ namespace sscm
         public double BillingQty { get; set; }
         public double PcsLeft { get; set; }
         public double SelloutQty { get; set; }
+        public string Status { get; set; }
     }
     public class SelloutItem
     {
