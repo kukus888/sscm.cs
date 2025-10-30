@@ -126,6 +126,18 @@ namespace sscm
                                         it.UploadQty = double.Parse(val, System.Globalization.CultureInfo.InvariantCulture);
                                     }
                                     break;
+                                case "Confirm Qty":
+                                    try
+                                    {
+                                        it.ConfirmQty = (double)rng.Cells.Value;
+                                    }
+                                    catch (System.InvalidCastException)
+                                    {
+                                        // Try to convert from string
+                                        string val = (string)rng.Cells.Value;
+                                        it.ConfirmQty = double.Parse(val, System.Globalization.CultureInfo.InvariantCulture);
+                                    }
+                                    break;
                                 default:
                                     continue;
                             }
@@ -135,6 +147,7 @@ namespace sscm
                             MessageBox.Show($"Error processing row {i}, column {HeaderKeys[j]}: {ex.Message}. Row will be omitted, please edit the excel source file.", "Data Error", MessageBoxButton.OK, MessageBoxImage.Error);
                         }
                     }
+                    it.RowIndex = i;
                     SelloutItems.Add(it);
                 }
             }
@@ -357,32 +370,28 @@ namespace sscm
                 var selloutItem = SelloutItems[selloutItemIndex];
                 selloutItem.ColorStatus = "Done";
                 selloutItem.Status = "Allocated: ";
-                double selloutItemLeft = selloutItem.UploadQty; // The amount we need to allocate
+                double selloutItemLeft = selloutItem.ConfirmQty; // The amount we need to allocate
                 // Find matching billing items
                 var matchingBillingItems = BillingItems.Where(b => b.SoldTo == selectedCompany && b.Material == selloutItem.Material).ToList();
                 foreach (var billingItem in matchingBillingItems)
                 {
+                    if (billingItem.PcsLeft <= 0) continue; // No pcs left to allocate
                     if (selloutItemLeft > billingItem.PcsLeft)
                     {
                         // Not enough billing quantity, allocate what we can and move to next billing item
                         selloutItemLeft -= billingItem.PcsLeft;
-                        if (billingItem.PcsLeft > 0)
-                        {
-                            selloutItem.Status += "[" + billingItem.BillingNo + " - " + billingItem.PcsLeft + " pc]";
-                            billingItem.Status += "[" + selloutItem.ConditionDocumentNo + " - " + billingItem.PcsLeft + "]";
-                            billingItem.SelloutQty += billingItem.PcsLeft;
-                        }
+                        selloutItem.Status += "[Partially from " + billingItem.BillingNo + " - " + billingItem.PcsLeft + " pc]";
+                        billingItem.Status += "[" + selloutItem.ConditionDocumentNo + " - " + billingItem.PcsLeft + " pc (partial replacement)]";
+                        billingItem.SelloutQty += billingItem.PcsLeft;
                         billingItem.PcsLeft = 0;
                     }
                     else
                     {
                         // Enough billing quantity, allocate and break out of the loop
                         billingItem.PcsLeft -= selloutItemLeft;
-                        if (selloutItemLeft > 0) {
-                            selloutItem.Status += "[" + billingItem.BillingNo + " - " + selloutItemLeft + " pc]";
-                            billingItem.Status += "[" + selloutItem.ConditionDocumentNo + " - " + selloutItemLeft + "]";
-                            billingItem.SelloutQty += selloutItemLeft;
-                        }
+                        selloutItem.Status += "[Everything from " + billingItem.BillingNo + " - " + selloutItemLeft + " pc]";
+                        billingItem.Status += "[" + selloutItem.ConditionDocumentNo + " - " + selloutItemLeft + " pc (everything)]";
+                        billingItem.SelloutQty += selloutItemLeft;
                         selloutItemLeft = 0;
                         break;
                     }
@@ -397,28 +406,23 @@ namespace sscm
                     var replacementBillingItems = BillingItems.Where(b => b.SoldTo == selectedCompany && b.Material.StartsWith(materialPattern.Substring(0, 7)) && b.Material.EndsWith(materialPattern.Substring(10))).ToList();
                     foreach (var billingItem in replacementBillingItems)
                     {
+                        if (billingItem.PcsLeft <= 0) continue; // No pcs left to allocate
                         if (selloutItemLeft > billingItem.PcsLeft)
                         {
                             // Not enough billing quantity, allocate what we can and move to next billing item
                             selloutItemLeft -= billingItem.PcsLeft;
-                            if (billingItem.PcsLeft > 0)
-                            {
-                                selloutItem.Status += "[" + billingItem.BillingNo + " - " + billingItem.PcsLeft + " pc]";
-                                billingItem.Status += "[" + selloutItem.ConditionDocumentNo + " - " + billingItem.PcsLeft + "]";
-                                billingItem.SelloutQty += billingItem.PcsLeft;
-                            }
+                            selloutItem.Status += "[Partial replacement from " + billingItem.Material + " " + billingItem.BillingNo + " - " + billingItem.PcsLeft + " pc]";
+                            billingItem.Status += "[" + selloutItem.ConditionDocumentNo + " - " + billingItem.PcsLeft + " pc (partial replacement)]";
+                            billingItem.SelloutQty += billingItem.PcsLeft;
                             billingItem.PcsLeft = 0;
                         }
                         else
                         {
                             // Enough billing quantity, allocate and break out of the loop
                             billingItem.PcsLeft -= selloutItemLeft;
-                            if (selloutItemLeft > 0) // Only log if we actually allocated something, sometimnes we may come here with 0 billing qty left
-                            {
-                                selloutItem.Status += "[" + billingItem.BillingNo + " - " + selloutItemLeft + " pc]";
-                                billingItem.Status += "[" + selloutItem.ConditionDocumentNo + " - " + selloutItemLeft + "]";
-                                billingItem.SelloutQty += selloutItemLeft;
-                            }
+                            selloutItem.Status += "[Replaced rest from " + billingItem.BillingNo + " - " + selloutItemLeft + " pc]";
+                            billingItem.Status += "[" + selloutItem.ConditionDocumentNo + " - " + selloutItemLeft + " pc (replaced rest)]";
+                            billingItem.SelloutQty += selloutItemLeft;
                             selloutItemLeft = 0;
                             break;
                         }
@@ -426,7 +430,7 @@ namespace sscm
                 }
                 if (selloutItemLeft > 0)
                 {
-                    var assignedQty = selloutItem.UploadQty - selloutItemLeft;
+                    var assignedQty = selloutItem.ConfirmQty - selloutItemLeft;
                     // Still not enough billing quantity, log a warning and update status, marking it red
                     if (assignedQty > 0)
                     {
@@ -733,27 +737,15 @@ namespace sscm
                 });
                 var selloutItem = failedSelloutItems[itemIndex];
                 int rowIndex = 2 + itemIndex;
-                // Find the row in the original excel
-                for (int row = 2; row <= RangeY; row++)
+                // Copy the row from the original excel to the new one
+                for (int col = 1; col <= RangeX; col++)
                 {
-                    Excel.Range conditionRng = (Excel.Range)xlSelloutTable.Cells[row, ConditionColumn];
-                    string conditionNo = (string)conditionRng.Cells.Value;
-                    Excel.Range materialRng = (Excel.Range)xlSelloutTable.Cells[row, MaterialColumn];
-                    string materialNo = (string)materialRng.Cells.Value;
-                    if (conditionNo == selloutItem.ConditionDocumentNo && materialNo == selloutItem.Material)
-                    {
-                        // We found the row, copy it
-                        for (int col = 1; col <= RangeX; col++)
-                        {
-                            Excel.Range cell = (Excel.Range)UsedCells.Cells[row, col];
-                            exportSheet.Cells[rowIndex, col] = cell.Text;
-                        }
-                        // Add Pcs not assigned and info
-                        exportSheet.Cells[rowIndex, PcsNotAssignedColumn] = selloutItem.NotFoundQty.ToString();
-                        exportSheet.Cells[rowIndex, InfoColumn] = selloutItem.Status;
-                        break; // Move to next sellout item
-                    }
+                    Excel.Range cell = (Excel.Range)UsedCells.Cells[selloutItem.RowIndex, col];
+                    exportSheet.Cells[rowIndex, col] = cell.Text;
                 }
+                // Add Pcs not assigned and info
+                exportSheet.Cells[rowIndex, PcsNotAssignedColumn] = selloutItem.NotFoundQty.ToString();
+                exportSheet.Cells[rowIndex, InfoColumn] = selloutItem.Status;
             }
             // Autosize columns
             exportSheet.Columns.AutoFit();
@@ -807,5 +799,10 @@ namespace sscm
         /// Done = Green
         /// </summary>
         public string ColorStatus { get; set; }
-    }
+        /// <summary>
+        /// Row index in the original excel file
+        /// </summary>
+        public int RowIndex { get; set; } = -1;
+        public double ConfirmQty { get; set; }
+        }
 }
