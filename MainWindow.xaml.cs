@@ -382,6 +382,7 @@ namespace sscm
                         selloutItemLeft -= billingItem.PcsLeft;
                         selloutItem.Status += "[Partially from " + billingItem.BillingNo + " - " + billingItem.PcsLeft + " pc]";
                         billingItem.Status += "[" + selloutItem.ConditionDocumentNo + " - " + billingItem.PcsLeft + " pc (partial replacement)]";
+                        billingItem.AllocatedItems.Add(new KeyValuePair<string, double>(selloutItem.ConditionDocumentNo, billingItem.PcsLeft));
                         billingItem.SelloutQty += billingItem.PcsLeft;
                         billingItem.PcsLeft = 0;
                     }
@@ -391,6 +392,7 @@ namespace sscm
                         billingItem.PcsLeft -= selloutItemLeft;
                         selloutItem.Status += "[Everything from " + billingItem.BillingNo + " - " + selloutItemLeft + " pc]";
                         billingItem.Status += "[" + selloutItem.ConditionDocumentNo + " - " + selloutItemLeft + " pc (everything)]";
+                        billingItem.AllocatedItems.Add(new KeyValuePair<string, double>(selloutItem.ConditionDocumentNo, selloutItemLeft));
                         billingItem.SelloutQty += selloutItemLeft;
                         selloutItemLeft = 0;
                         break;
@@ -413,6 +415,7 @@ namespace sscm
                             selloutItemLeft -= billingItem.PcsLeft;
                             selloutItem.Status += "[Partial replacement from " + billingItem.Material + " " + billingItem.BillingNo + " - " + billingItem.PcsLeft + " pc]";
                             billingItem.Status += "[" + selloutItem.ConditionDocumentNo + " - " + billingItem.PcsLeft + " pc (partial replacement)]";
+                            billingItem.AllocatedItems.Add(new KeyValuePair<string, double>(selloutItem.ConditionDocumentNo, billingItem.PcsLeft));
                             billingItem.SelloutQty += billingItem.PcsLeft;
                             billingItem.PcsLeft = 0;
                         }
@@ -422,6 +425,7 @@ namespace sscm
                             billingItem.PcsLeft -= selloutItemLeft;
                             selloutItem.Status += "[Replaced rest from " + billingItem.BillingNo + " - " + selloutItemLeft + " pc]";
                             billingItem.Status += "[" + selloutItem.ConditionDocumentNo + " - " + selloutItemLeft + " pc (replaced rest)]";
+                            billingItem.AllocatedItems.Add(new KeyValuePair<string, double>(selloutItem.ConditionDocumentNo, selloutItemLeft));
                             billingItem.SelloutQty += selloutItemLeft;
                             selloutItemLeft = 0;
                             break;
@@ -540,25 +544,28 @@ namespace sscm
                     // This billing item was not in the original list, skip it
                     continue;
                 }
-                int selloutQty = (int)billingItem.SelloutQty;
-                if (selloutQty == 0) continue;
-                for (int j = 1; j <= RangeX; j++)
+                foreach (var allocatedItem in billingItem.AllocatedItems)
                 {
-                    Excel.Range cell = (Excel.Range)rangeRow.Cells[1, j];
-                    if (j == PcsLeftColumn)
+                    int selloutQty = (int)billingItem.SelloutQty;
+                    if (selloutQty == 0) continue;
+                    for (int j = 1; j <= RangeX; j++)
                     {
-                        //var rng = (Excel.Range)exportSheet.Cells[rowIndex, j];
-                        exportSheet.Cells[rowIndex, j] = billingItem.PcsLeft.ToString();
+                        Excel.Range cell = (Excel.Range)rangeRow.Cells[1, j];
+                        if (j == PcsLeftColumn)
+                        {
+                            //var rng = (Excel.Range)exportSheet.Cells[rowIndex, j];
+                            exportSheet.Cells[rowIndex, j] = billingItem.PcsLeft.ToString();
+                        }
+                        else
+                        {
+                            exportSheet.Cells[rowIndex, j] = cell.Text;
+                        }
                     }
-                    else
-                    {
-                        exportSheet.Cells[rowIndex, j] = cell.Text;
-                    }
+                    // Add Sell-out qty and allocation info value
+                    exportSheet.Cells[rowIndex, RangeX + 1] = allocatedItem.Value;
+                    exportSheet.Cells[rowIndex, RangeX + 2] = allocatedItem.Key + "-" + allocatedItem.Value.ToString();
+                    rowIndex++;
                 }
-                // Add Sell-out qty and allocation info value
-                exportSheet.Cells[rowIndex, RangeX + 1] = selloutQty;
-                exportSheet.Cells[rowIndex, RangeX + 2] = billingItem.Status;
-                rowIndex++;
             }
             // Autosize columns
             exportSheet.Columns.AutoFit();
@@ -781,6 +788,7 @@ namespace sscm
         public double PcsLeft { get; set; }
         public double SelloutQty { get; set; }
         public string Status { get; set; }
+        public List<KeyValuePair<string, double>> AllocatedItems { get; set; } = new List<KeyValuePair<string, double>>();
     }
     public class SelloutItem
     {
